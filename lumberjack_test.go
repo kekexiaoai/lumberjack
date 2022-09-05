@@ -504,7 +504,7 @@ func TestTimeFromName(t *testing.T) {
 		want     time.Time
 		wantErr  bool
 	}{
-		{"foo.2014-05-04T14-44-33.555.0.log", time.Date(2014, 5, 4, 14, 44, 33, 555000000, time.UTC), false},
+		{"foo.2014-05-04T14-44-33.555.log.1", time.Date(2014, 5, 4, 14, 44, 33, 555000000, time.UTC), false},
 		{"foo.2014-05-04T14-44-33.555", time.Time{}, true},
 		{"2014-05-04T14-44-33.555.log", time.Time{}, true},
 		{"foo.log", time.Time{}, true},
@@ -794,11 +794,11 @@ func logFile(dir string) string {
 }
 
 func backupFile(dir string) string {
-	return filepath.Join(dir, "foobar."+fakeTime().UTC().Format(backupTimeFormat)+".1.log")
+	return filepath.Join(dir, "foobar."+fakeTime().UTC().Format(backupTimeFormat)+".log.1")
 }
 
 func backupFileLocal(dir string) string {
-	return filepath.Join(dir, "foobar."+fakeTime().Format(backupTimeFormat)+".1.log")
+	return filepath.Join(dir, "foobar."+fakeTime().Format(backupTimeFormat)+".log.1")
 }
 
 // logFileLocal returns the log file name in the given directory for the current

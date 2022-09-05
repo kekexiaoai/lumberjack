@@ -29,6 +29,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -277,7 +278,7 @@ func backupName(name string, backupTimeFormat string, local bool, files []logInf
 			idx = newest.idx
 		}
 	}
-	return filepath.Join(dir, fmt.Sprintf("%s.%s.%d%s", prefix, timestamp, idx+1, ext))
+	return filepath.Join(dir, fmt.Sprintf("%s.%s%s.%d", prefix, timestamp, ext, idx+1))
 }
 
 // openExistingOrNew opens the logfile if it exists and if the current write
@@ -436,10 +437,6 @@ func (l *Logger) oldLogFiles() ([]logInfo, error) {
 			logFiles = append(logFiles, logInfo{t, f, idx})
 			continue
 		}
-		if t, idx, err := l.timeFromName(f.Name(), prefix, ext+compressSuffix); err == nil {
-			logFiles = append(logFiles, logInfo{t, f, idx})
-			continue
-		}
 		// error parsing means that the suffix at the end was not generated
 		// by lumberjack, and therefore it's not a backup file.
 	}
@@ -456,18 +453,17 @@ func (l *Logger) timeFromName(filename, prefix, ext string) (time.Time, int, err
 	if !strings.HasPrefix(filename, prefix) {
 		return time.Time{}, 0, errors.New("mismatched prefix")
 	}
-	if !strings.HasSuffix(filename, ext) {
-		return time.Time{}, 0, errors.New("mismatched extension")
+
+	pattern := fmt.Sprintf("^%s\\.(?P<ts>.+)(?P<ext>\\%s)\\.(?P<idx>\\d+)(?P<compressSuffix>\\%s)?$", prefix[:len(prefix)-1], ext, compressSuffix)
+	re := regexp.MustCompile(pattern)
+
+	matches := re.FindStringSubmatch(filename)
+	if len(matches) == 0 || len(matches) < 4 {
+		return time.Time{}, 0, errors.New("mismatched ext")
 	}
 
-	index := filepath.Ext(filename[:len(filename)-len(ext)])
-	if len(index) == 0 {
-		return time.Time{}, 0, errors.New("mismatched index")
-	}
-	idx, _ := strconv.Atoi(index[1:])
-
-	ts := filename[len(prefix) : len(filename)-len(index)-len(ext)]
-	t, err := time.Parse(l.BackupTimeFormat, ts)
+	idx, _ := strconv.Atoi(matches[3])
+	t, err := time.Parse(l.BackupTimeFormat, matches[1])
 	if err != nil {
 		return time.Time{}, 0, err
 	}
