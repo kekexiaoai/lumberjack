@@ -118,6 +118,9 @@ type Logger struct {
 
 	millCh    chan bool
 	startMill sync.Once
+
+	idx       int
+	timestamp string
 }
 
 func (l *Logger) Complete() *Logger {
@@ -230,11 +233,10 @@ func (l *Logger) openNew() error {
 		// Copy the mode off the old logfile.
 		mode = info.Mode()
 		// move the existing file
-		files, err := l.oldLogFiles()
+		newname, err := l.backupName()
 		if err != nil {
 			return err
 		}
-		newname := backupName(name, l.BackupTimeFormat, l.LocalTime, files)
 		if err := os.Rename(name, newname); err != nil {
 			return fmt.Errorf("can't rename log file: %s", err)
 		}
@@ -260,25 +262,40 @@ func (l *Logger) openNew() error {
 // backupName creates a new filename from the given name, inserting a timestamp
 // between the filename and the extension, using the local time if requested
 // (otherwise UTC).
-func backupName(name string, backupTimeFormat string, local bool, files []logInfo) string {
-	dir := filepath.Dir(name)
-	filename := filepath.Base(name)
-	ext := filepath.Ext(filename)
-	prefix := filename[:len(filename)-len(ext)]
+func (l *Logger) backupName() (string, error) {
+	dir := filepath.Dir(l.filename())
+
+	prefix, ext := l.prefixAndExt()
 	t := currentTime()
-	if !local {
+	if !l.LocalTime {
 		t = t.UTC()
 	}
 
-	timestamp := t.Format(backupTimeFormat)
-	idx := 0
-	if len(files) > 0 {
-		newest := files[0]
-		if newest.timestamp.Format(backupTimeFormat) == timestamp {
-			idx = newest.idx
+	timestamp := t.Format(l.BackupTimeFormat)
+
+	if l.idx == 0 {
+		l.timestamp = timestamp
+		l.idx++
+		files, err := l.oldLogFiles()
+		if err != nil {
+			return "", err
+		}
+		if len(files) > 0 {
+			newest := files[0]
+			if newest.timestamp.Format(l.BackupTimeFormat) == timestamp {
+				l.idx += newest.idx
+			}
+		}
+	} else {
+		if timestamp != l.timestamp {
+			l.timestamp = timestamp
+			l.idx = 1
+		} else {
+			l.idx += 1
 		}
 	}
-	return filepath.Join(dir, fmt.Sprintf("%s.%s%s.%d", prefix, timestamp, ext, idx+1))
+
+	return filepath.Join(dir, fmt.Sprintf("%s%s%s.%d", prefix, l.timestamp, ext, l.idx)), nil
 }
 
 // openExistingOrNew opens the logfile if it exists and if the current write
@@ -454,16 +471,27 @@ func (l *Logger) timeFromName(filename, prefix, ext string) (time.Time, int, err
 		return time.Time{}, 0, errors.New("mismatched prefix")
 	}
 
-	pattern := fmt.Sprintf("^%s\\.(?P<ts>.+)(?P<ext>\\%s)\\.(?P<idx>\\d+)(?P<compressSuffix>\\%s)?$", prefix[:len(prefix)-1], ext, compressSuffix)
+	var pattern string
+	if ext != "" {
+		pattern = fmt.Sprintf("^%s\\.(?P<ts>.+)(?P<ext>\\%s)\\.(?P<idx>\\d+)(?P<compressSuffix>\\%s)?$", prefix[:len(prefix)-1], ext, compressSuffix)
+	} else {
+		pattern = fmt.Sprintf("^%s\\.(?P<ts>.+)\\.(?P<idx>\\d+)(?P<compressSuffix>\\%s)?$", prefix[:len(prefix)-1], compressSuffix)
+	}
 	re := regexp.MustCompile(pattern)
 
 	matches := re.FindStringSubmatch(filename)
-	if len(matches) == 0 || len(matches) < 4 {
+	if len(matches) == 0 {
 		return time.Time{}, 0, errors.New("mismatched ext")
 	}
+	result := make(map[string]string)
+	for i, name := range re.SubexpNames() {
+		if i != 0 && name != "" {
+			result[name] = matches[i]
+		}
+	}
 
-	idx, _ := strconv.Atoi(matches[3])
-	t, err := time.Parse(l.BackupTimeFormat, matches[1])
+	idx, _ := strconv.Atoi(result["idx"])
+	t, err := time.Parse(l.BackupTimeFormat, result["ts"])
 	if err != nil {
 		return time.Time{}, 0, err
 	}
@@ -490,6 +518,9 @@ func (l *Logger) prefixAndExt() (prefix, ext string) {
 	filename := filepath.Base(l.filename())
 	ext = filepath.Ext(filename)
 	prefix = filename[:len(filename)-len(ext)] + "."
+	if l.Compress {
+		ext = ""
+	}
 	return prefix, ext
 }
 
